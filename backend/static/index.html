@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EquiTask AI — Local coordination console</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to main content</a>
+  <header>
+    <h1>EquiTask AI</h1>
+    <p>Fair, consent-based volunteer coordination. Local research console.</p>
+  </header>
+  <main id="main">
+    <section aria-labelledby="seed-heading">
+      <h2 id="seed-heading">1. Load a simulated scenario</h2>
+      <p class="hint">No real people or organizations are created. Data is local and clearly fictional.</p>
+      <form id="seed-form">
+        <label for="seed-volunteers">Volunteers <input id="seed-volunteers" type="number" min="1" max="200" value="20" /></label>
+        <label for="seed-tasks">Tasks <input id="seed-tasks" type="number" min="1" max="200" value="6" /></label>
+        <button type="submit">Load scenario</button>
+      </form>
+      <pre id="seed-output" aria-live="polite"></pre>
+    </section>
+
+    <section aria-labelledby="auth-heading">
+      <h2 id="auth-heading">2. Sign in</h2>
+      <form id="login-form">
+        <label for="email">Email <input id="email" type="email" value="demo-org@example.test" required /></label>
+        <label for="password">Password <input id="password" type="password" value="DemoPass123!" required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+      <p id="auth-status" aria-live="polite">Not signed in.</p>
+    </section>
+
+    <section aria-labelledby="alloc-heading">
+      <h2 id="alloc-heading">3. Run the allocation engine</h2>
+      <p class="hint">The solver creates proposals only. Nothing becomes active without volunteer consent.</p>
+      <form id="alloc-form">
+        <label for="project-id">Project ID <input id="project-id" type="text" required /></label>
+        <button type="submit">Generate proposals</button>
+      </form>
+      <pre id="alloc-output" aria-live="polite"></pre>
+    </section>
+
+    <section aria-labelledby="explain-heading">
+      <h2 id="explain-heading">4. Understand the result</h2>
+      <pre id="explain-output" aria-live="polite">No run yet.</pre>
+    </section>
+
+    <section aria-labelledby="about-heading">
+      <h2 id="about-heading">What this verifies</h2>
+      <ul>
+        <li>Hard constraints are enforced by OR-Tools CP-SAT.</li>
+        <li>Unknown or stale information is preserved, not guessed.</li>
+        <li>Proposals require recorded consent before activation.</li>
+        <li>Withdrawal generates a repair diff without silently changing other commitments.</li>
+      </ul>
+      <p>Independent research prototype. Not affiliated with UNV, HOT, or OpenStreetMap.</p>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
