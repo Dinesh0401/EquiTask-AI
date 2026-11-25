@@ -59,6 +59,97 @@ def _make_admin(db_session, client, email, password="AdminPass123!", display_nam
     db_session.commit()
 
 
+def _seed_volunteer_db(
+    db_session,
+    client,
+    email,
+    password,
+    display_name,
+    skills=None,
+    availability_state="KNOWN_TRUE",
+    capacity_hours=10.0,
+):
+    """Create a volunteer user, profile, skills, and availability directly in the DB.
+
+    Returns the volunteer's auth headers (login via API).
+    """
+    from app.auth import hash_password
+    from app.models import Volunteer, VolunteerSkill, AvailabilityWindow
+    from app.enums import KnowledgeState
+
+    # Create user directly in DB (self-registration of VOLUNTEER via API also works,
+    # but direct creation avoids TestClient/session isolation issues).
+    user = User(
+        id=new_id("usr"),
+        email=email.lower(),
+        password_hash=hash_password(password),
+        role=Role.VOLUNTEER.value,
+        display_name=display_name,
+    )
+    db_session.add(user)
+    db_session.flush()
+
+    volunteer = Volunteer(
+        id=new_id("vol"),
+        user_id=user.id,
+        display_name=display_name,
+        timezone="UTC",
+        weekly_capacity_hours=capacity_hours,
+        country_code="US",
+        contact_permitted=1,
+    )
+    db_session.add(volunteer)
+    db_session.flush()
+
+    # Add skills
+    for skill_name, proficiency, state in (skills or []):
+        skill = _get_or_create_skill_db(db_session, skill_name)
+        db_session.add(
+            VolunteerSkill(
+                volunteer_id=volunteer.id,
+                skill_id=skill.id,
+                proficiency=proficiency,
+                epistemic_state=state,
+                observed_at=utcnow(),
+                source="self_report",
+            )
+        )
+
+    # Add availability
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    db_session.add(
+        AvailabilityWindow(
+            id=new_id("avl"),
+            volunteer_id=volunteer.id,
+            start_utc=now,
+            end_utc=now + timedelta(days=5),
+            epistemic_state=availability_state,
+        )
+    )
+
+    db_session.flush()
+
+    # Return auth headers by logging in via API
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert resp.status_code == 200, f"login failed: {resp.text}"
+    token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _get_or_create_skill_db(db_session, name):
+    from app.models import Skill
+
+    skill = db_session.scalar(select(Skill).where(Skill.name == name))
+    if skill is None:
+        skill = Skill(id=new_id("skl"), name=name)
+        db_session.add(skill)
+        db_session.flush()
+    return skill
+
+
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
@@ -179,6 +270,7 @@ def _seed_org_and_project(client, db_session, org_name="Demo Nonprofit Two", cou
     assert project_resp.status_code in (200, 201), project_resp.text
     project_id = project_resp.json()["id"]
 
+    # Task 1: Dec 1-3 window
     task_resp = client.post(
         "/api/v1/tasks",
         json={
@@ -197,7 +289,30 @@ def _seed_org_and_project(client, db_session, org_name="Demo Nonprofit Two", cou
         headers=headers,
     )
     assert task_resp.status_code in (200, 201), task_resp.text
-    return project_id, task_resp.json()["id"], headers, org_id
+    task_id_1 = task_resp.json()["id"]
+
+    # Task 2: Dec 4-6 window (non-overlapping with task 1)
+    task2_resp = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project_id,
+            "name": "Review translation",
+            "description": "Review the translated welcome page.",
+            "required_skills": [{"skill": "translation", "min_proficiency": 50, "mandatory": True}],
+            "effort_hours": 3,
+            "start_utc": (now + timedelta(days=4)).isoformat(),
+            "end_utc": (now + timedelta(days=6)).isoformat(),
+            "deadline_utc": (now + timedelta(days=7)).isoformat(),
+            "max_assignees": 1,
+            "value": 80,
+            "acceptance_criteria_present": True,
+        },
+        headers=headers,
+    )
+    assert task2_resp.status_code in (200, 201), task2_resp.text
+    task_id_2 = task2_resp.json()["id"]
+
+    return project_id, task_id_1, headers, org_id, task_id_2
 
 
 def test_create_project_and_task(client, db_session):
@@ -207,7 +322,7 @@ def test_create_project_and_task(client, db_session):
 def test_cannot_create_task_in_another_orgs_project(client, db_session):
     """P0: a coordinator cannot create tasks in another organization's project."""
     # Org A
-    project_id_a, _, headers_a, org_id_a = _seed_org_and_project(client, db_session, "Org A", "US")
+    project_id_a, _, headers_a, org_id_a, _ = _seed_org_and_project(client, db_session, "Org A", "US")
     # Org B coordinator tries to use Org A's project
     _register(client, "orgb@example.test", "ORGANIZATION", "OrgBPass123!")
     headers_b = _auth_header(client, "orgb@example.test", "OrgBPass123!")
@@ -249,7 +364,7 @@ def test_cannot_create_task_in_another_orgs_project(client, db_session):
 # ---------------------------------------------------------------------------
 
 def test_allocation_run_returns_proposals_only(client, db_session):
-    project_id, task_id, headers, org_id = _seed_org_and_project(client, db_session)
+    project_id, task_id, headers, org_id, _ = _seed_org_and_project(client, db_session)
     resp = client.post(
         "/api/v1/allocations/run",
         json={"project_id": project_id},
@@ -277,7 +392,7 @@ def test_allocation_run_invalid_input(client, db_session):
 
 def test_cannot_run_allocation_for_another_org(client, db_session):
     """P0: a coordinator cannot run allocation for another organization."""
-    project_id_a, _, headers_a, _ = _seed_org_and_project(client, db_session, "Org A", "US")
+    project_id_a, _, headers_a, _, _ = _seed_org_and_project(client, db_session, "Org A", "US")
     # Org B coordinator
     _register(client, "orgb2@example.test", "ORGANIZATION", "OrgB2Pass123!")
     headers_b = _auth_header(client, "orgb2@example.test", "OrgB2Pass123!")
@@ -306,15 +421,17 @@ def test_cannot_run_allocation_for_another_org(client, db_session):
 # ---------------------------------------------------------------------------
 
 def test_proposal_consent_idempotency(client, db_session):
-    project_id, task_id, headers, org_id = _seed_org_and_project(client, db_session)
+    project_id, task_id, headers, org_id, _ = _seed_org_and_project(client, db_session)
 
-    # Seed a volunteer
-    _register(client, "vol3@example.test", "VOLUNTEER", "Vol3Pass123!")
-    vol_headers = _auth_header(client, "vol3@example.test", "Vol3Pass123!")
-    client.post(
-        "/api/v1/volunteers",
-        json={"display_name": "Vol Three", "timezone": "UTC", "weekly_capacity_hours": 10, "contact_permitted": True},
-        headers=vol_headers,
+    # Seed a volunteer with translation skill directly in the DB.
+    vol_headers = _seed_volunteer_db(
+        db_session,
+        client,
+        "vol3@example.test",
+        "Vol3Pass123!",
+        "Vol Three",
+        skills=[("translation", 80, "KNOWN_TRUE")],
+        availability_state="KNOWN_TRUE",
     )
 
     # Run allocation to create a proposal
@@ -357,14 +474,17 @@ def test_proposal_consent_idempotency(client, db_session):
 
 def test_idempotency_key_reuse_for_different_proposal_rejected(client, db_session):
     """P1: an idempotency key must not be reusable across different proposals."""
-    project_id, task_id, headers, org_id = _seed_org_and_project(client, db_session)
+    project_id, _, headers, org_id, _ = _seed_org_and_project(client, db_session)
 
-    _register(client, "vol4@example.test", "VOLUNTEER", "Vol4Pass123!")
-    vol_headers = _auth_header(client, "vol4@example.test", "Vol4Pass123!")
-    client.post(
-        "/api/v1/volunteers",
-        json={"display_name": "Vol Four", "timezone": "UTC", "weekly_capacity_hours": 10, "contact_permitted": True},
-        headers=vol_headers,
+    # Seed a volunteer with translation skill directly in the DB.
+    vol_headers = _seed_volunteer_db(
+        db_session,
+        client,
+        "vol4@example.test",
+        "Vol4Pass123!",
+        "Vol Four",
+        skills=[("translation", 80, "KNOWN_TRUE")],
+        availability_state="KNOWN_TRUE",
     )
 
     resp = client.post("/api/v1/allocations/run", json={"project_id": project_id}, headers=headers)

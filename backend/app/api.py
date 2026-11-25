@@ -744,6 +744,7 @@ def get_proposal(
         )
         if membership is None:
             raise HTTPException(403, "Not a member of this organization")
+        return proposal
     raise HTTPException(403, "Not permitted to view this proposal")
 
 
@@ -764,6 +765,10 @@ def respond_to_proposal(
     if existing:
         if str(existing.proposal_id) != proposal_id:
             raise HTTPException(409, f"Idempotency key already used for a different proposal ({existing.proposal_id})")
+        if str(existing.actor_id) != str(user.id):
+            raise HTTPException(409, f"Idempotency key already used by a different actor ({existing.actor_id})")
+        if existing.action != payload.action:
+            raise HTTPException(409, f"Idempotency key already used for a different action ({existing.action})")
         assignment = db.scalar(select(Assignment).where(Assignment.proposal_id == proposal_id))
         return {
             "status": "already_processed",
@@ -817,10 +822,10 @@ def respond_to_proposal(
             availability_rows = list(
                 db.scalars(select(AvailabilityWindow).where(AvailabilityWindow.volunteer_id == volunteer.id)).all()
             )
-            if any(row.epistemic_state == KnowledgeState.KNOWN_FALSE.value for row in availability_rows):
+            if not any(row.epistemic_state == KnowledgeState.KNOWN_TRUE.value for row in availability_rows):
                 proposal.state = ProposalState.EXPIRED.value
                 db.commit()
-                raise HTTPException(409, "Availability is explicitly false")
+                raise HTTPException(409, "Availability is not confirmed as known true")
             active_total = 0.0
             assignments = list(
                 db.scalars(
@@ -864,24 +869,24 @@ def respond_to_proposal(
                         f"Volunteer does not report skill {skill.name} required by task {task.id}",
                     )
                 vs_row = vs[0]
-                if bool(row.mandatory) and vs_row.epistemic_state == KnowledgeState.KNOWN_FALSE.value:
-                    proposal.state = ProposalState.EXPIRED.value
-                    db.commit()
-                    raise HTTPException(
-                        409,
-                        f"Skill {skill.name} is explicitly false for volunteer {volunteer.id}",
-                    )
-                if (
-                    bool(row.mandatory)
-                    and vs_row.epistemic_state == KnowledgeState.KNOWN_TRUE.value
-                    and vs_row.proficiency < row.min_proficiency
-                ):
-                    proposal.state = ProposalState.EXPIRED.value
-                    db.commit()
-                    raise HTTPException(
-                        409,
-                        f"Skill {skill.name} proficiency {vs_row.proficiency} below required {row.min_proficiency}",
-                    )
+                if bool(row.mandatory):
+                    # UNKNOWN or STALE mandatory skills cannot confirm eligibility.
+                    # Only KNOWN_TRUE with sufficient proficiency is accepted.
+                    if vs_row.epistemic_state != KnowledgeState.KNOWN_TRUE.value:
+                        proposal.state = ProposalState.EXPIRED.value
+                        db.commit()
+                        raise HTTPException(
+                            409,
+                            f"Mandatory skill {skill.name} is {vs_row.epistemic_state}; "
+                            "eligibility must be confirmed before acceptance.",
+                        )
+                    if vs_row.proficiency < row.min_proficiency:
+                        proposal.state = ProposalState.EXPIRED.value
+                        db.commit()
+                        raise HTTPException(
+                            409,
+                            f"Skill {skill.name} proficiency {vs_row.proficiency} below required {row.min_proficiency}",
+                        )
 
             # Required languages must be known.
             if task.required_languages_json:
@@ -1001,6 +1006,8 @@ def record_event(
     if existing:
         if str(existing.aggregate_id) != str(payload.assignment_id):
             raise HTTPException(409, f"Idempotency key already used for a different aggregate ({existing.aggregate_id})")
+        if str(existing.payload_json.get("actor_id", "")) != str(user.id):
+            raise HTTPException(409, f"Idempotency key already used by a different actor")
         return {"status": "already_processed", "event_type": existing.event_type}
 
     if payload.event_type != "WITHDRAWAL" or not payload.assignment_id:

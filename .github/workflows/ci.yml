@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, phase-1-1-security-correctness]
   pull_request:
     branches: [master]
 
@@ -33,6 +33,14 @@ jobs:
       - name: Run test suite
         run: |
           EQUITASK_PASSWORD_ITERATIONS=1000 python -m pytest tests/ -v
+
+      - name: Test Alembic migrations
+        run: |
+          cd backend
+          rm -f test_migration.db
+          EQUITASK_DATABASE_URL="sqlite:///test_migration.db" python -m alembic upgrade head
+          python -c "import sqlite3; c=sqlite3.connect('test_migration.db'); cols=[r[1] for r in c.execute('PRAGMA table_info(tasks)')]; assert 'required' in cols; print('Migration OK')"
+          rm -f test_migration.db
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
