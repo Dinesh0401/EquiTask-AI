@@ -133,20 +133,24 @@ def allocate(
         candidates_by_task[candidate.task_id].append(candidate)
         candidates_by_volunteer[candidate.volunteer_id].append(candidate)
 
-    # H3: cover required tasks exactly once.
+    # H3: cover required tasks exactly once; optional tasks are best-effort.
     for task in publishable_tasks:
         matching = [x[(c.volunteer_id, c.task_id)] for c in candidates_by_task.get(task.id, [])]
-        if len(matching) < task.max_assignees:
-            return _failure(
-                problem,
-                candidate_set,
-                SolverStatus.NO_FEASIBLE_PROPOSAL,
-                ["NO_CANDIDATES"],
-                [f"Task {task.id} has fewer hard-safe candidates than required assignees."],
-                questions,
-                elapsed(),
-            )
-        model.Add(sum(matching) == task.max_assignees)
+        if task.required:
+            if len(matching) < task.max_assignees:
+                return _failure(
+                    problem,
+                    candidate_set,
+                    SolverStatus.NO_FEASIBLE_PROPOSAL,
+                    ["NO_CANDIDATES"],
+                    [f"Required task {task.id} has fewer hard-safe candidates than required assignees."],
+                    questions,
+                    elapsed(),
+                )
+            model.Add(sum(matching) == task.max_assignees)
+        else:
+            # Optional task: cover as many assignees as possible, up to max_assignees.
+            model.Add(sum(matching) <= task.max_assignees)
 
     # H2: remaining capacity across all proposed tasks.
     effort_by_task = {t.id: _int(t.effort_hours * HOUR_SCALE) for t in problem.tasks}

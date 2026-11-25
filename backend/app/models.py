@@ -121,6 +121,7 @@ class Task(Base):
     acceptance_criteria_present: Mapped[bool] = mapped_column(Integer, default=1)
     required_languages_json: Mapped[list] = mapped_column(JSON, default=list)
     requires_approval: Mapped[bool] = mapped_column(Integer, default=0)
+    required: Mapped[bool] = mapped_column(Integer, default=1)
 
 
 class TaskSkill(Base):

@@ -132,6 +132,7 @@ class TaskCreate(BaseModel):
     acceptance_criteria_present: bool = True
     required_languages: list[str] = Field(default_factory=list)
     requires_approval: bool = False
+    required: bool = True
 
 
 class TaskOut(ORMModel):
@@ -196,6 +197,7 @@ class TaskInput(BaseModel):
     organization_verified: bool = True
     required_languages: list[str] = Field(default_factory=list)
     requires_approval: bool = False
+    required: bool = Field(default=True, description="If True, the task must be fully covered; if False, best-effort partial coverage is acceptable.")
 
     @model_validator(mode="after")
     def _check_times(self) -> "TaskInput":

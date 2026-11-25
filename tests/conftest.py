@@ -19,6 +19,14 @@ def settings():
     return get_settings()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def create_test_schema() -> None:
+    """Create all tables in the test database once per session."""
+    Base.metadata.create_all(bind=app_engine)
+    yield
+    Base.metadata.drop_all(bind=app_engine)
+
+
 @pytest.fixture()
 def db_session() -> Session:
     """Provide a transactional SQLite session for each test."""

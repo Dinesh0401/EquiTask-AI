@@ -31,15 +31,20 @@ async def invalid_transition_handler(_: Request, exc: InvalidTransition) -> JSON
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
-class SimpleRateLimit:
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse as _JSONResponse
+
+
+class SimpleRateLimit(BaseHTTPMiddleware):
     """Small in-process fixed-window limiter; replace with gateway/Redis for multi-instance deployment."""
 
-    def __init__(self, limit: int, window_seconds: int = 60) -> None:
+    def __init__(self, app, limit: int = 120, window_seconds: int = 60) -> None:
+        super().__init__(app)
         self.limit = limit
         self.window = window_seconds
         self.hits: dict[str, deque[float]] = defaultdict(deque)
 
-    async def __call__(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
         if not request.url.path.startswith("/api/"):
             return await call_next(request)
         now = time.monotonic()
@@ -48,7 +53,7 @@ class SimpleRateLimit:
         while bucket and now - bucket[0] > self.window:
             bucket.popleft()
         if len(bucket) >= self.limit:
-            return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
+            return _JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
         bucket.append(now)
         return await call_next(request)
 
