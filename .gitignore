@@ -54,5 +54,5 @@ htmlcov/
 docs/.vitepress/
 
 # Simulation experiment results (generated output, not source)
-simulations/*.json
+simulations/results_*.json
 simulations/test_*.db
