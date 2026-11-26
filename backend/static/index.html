@@ -1,65 +1,477 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-i18n-lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>EquiTask AI — Local coordination console</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <title data-i18n="app.name">EquiTask AI</title>
+  <meta name="description" data-i18n="app.tagline" content="Fair, consent-based volunteer coordination — local research demo" />
+  <link rel="stylesheet" href="/styles.css?v=4" />
 </head>
 <body>
-  <a class="skip" href="#main">Skip to main content</a>
-  <header>
-    <h1>EquiTask AI</h1>
-    <p>Fair, consent-based volunteer coordination. Local research console.</p>
+  <a class="skip" href="#main" data-i18n="nav.skip">Skip to main content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="#/" class="brand" data-i18n="app.name">EquiTask AI</a>
+      <p class="tagline" data-i18n="app.tagline">Fair, consent-based volunteer coordination — local research demo</p>
+      <div class="header-actions">
+        <button class="lang-toggle" id="lang-toggle" aria-haspopup="true" aria-expanded="false" data-i18n-aria-label="nav.langSwitch">🌐</button>
+        <nav id="main-nav" aria-label="Main navigation"></nav>
+        <button id="signout-btn" class="button button--ghost signout" data-i18n="nav.logout">Sign out</button>
+      </div>
+    </div>
+    <div id="auth-banner" class="auth-banner" role="status" aria-live="polite"></div>
   </header>
-  <main id="main">
-    <section aria-labelledby="seed-heading">
-      <h2 id="seed-heading">1. Load a simulated scenario</h2>
-      <p class="hint">No real people or organizations are created. Data is local and clearly fictional.</p>
-      <form id="seed-form">
-        <label for="seed-volunteers">Volunteers <input id="seed-volunteers" type="number" min="1" max="200" value="20" /></label>
-        <label for="seed-tasks">Tasks <input id="seed-tasks" type="number" min="1" max="200" value="6" /></label>
-        <button type="submit">Load scenario</button>
+
+  <main id="main" tabindex="-1">
+    <!-- ============ LOGIN ============ -->
+    <section id="page-login" class="page" role="region" aria-labelledby="login-heading" hidden>
+      <h2 id="login-heading" data-i18n="auth.signin">Sign in</h2>
+      <form id="form-login" class="form card" novalidate>
+        <div class="form-field" data-i18n="auth.email">
+          <label for="login-email">Email address <span class="req" aria-hidden="true">*</span></label>
+          <input id="login-email" type="email" name="email" required autocomplete="email" />
+          <span class="field-error" id="login-email-error" aria-live="polite"></span>
+        </div>
+        <div class="form-field" data-i18n="auth.password">
+          <label for="login-password">Password <span class="req" aria-hidden="true">*</span></label>
+          <input id="login-password" type="password" name="password" required autocomplete="current-password" />
+          <span class="field-error" id="login-password-error" aria-live="polite"></span>
+        </div>
+        <button type="submit" class="button button--primary button--wide" id="login-submit" data-i18n="auth.signInButton">Sign in</button>
+        <p class="form-footer" data-i18n="auth.noAccount">Don't have an account?</p>
+        <a href="#/register" class="button button--ghost button--wide" data-i18n="auth.register">Create an account</a>
       </form>
-      <pre id="seed-output" aria-live="polite"></pre>
+      <div id="login-message" role="alert" aria-live="polite" class="message"></div>
     </section>
 
-    <section aria-labelledby="auth-heading">
-      <h2 id="auth-heading">2. Sign in</h2>
-      <form id="login-form">
-        <label for="email">Email <input id="email" type="email" value="demo-org@example.test" required /></label>
-        <label for="password">Password <input id="password" type="password" value="DemoPass123!" required /></label>
-        <button type="submit">Sign in</button>
+    <!-- ============ REGISTER ============ -->
+    <section id="page-register" class="page" role="region" aria-labelledby="register-heading" hidden>
+      <h2 id="register-heading" data-i18n="auth.register">Create an account</h2>
+      <form id="form-register" class="form card" novalidate>
+        <div class="form-field">
+          <label for="reg-role">I am registering as <span class="req" aria-hidden="true">*</span></label>
+          <select id="reg-role" name="role" required>
+            <option value="" disabled selected hidden data-i18n="auth.role">I am registering as</option>
+            <option value="VOLUNTEER" data-i18n="auth.roleVolunteer">Volunteer</option>
+            <option value="ORGANIZATION" data-i18n="auth.roleOrganization">Organization representative</option>
+          </select>
+          <span class="field-error" id="reg-role-error" aria-live="polite"></span>
+          <p class="hint" data-i18n="auth.role">Admin and coordinator accounts are created by an administrator.</p>
+        </div>
+        <div class="form-field" data-i18n="auth.email">
+          <label for="reg-email">Email address <span class="req" aria-hidden="true">*</span></label>
+          <input id="reg-email" type="email" name="email" required autocomplete="email" />
+          <span class="field-error" id="reg-email-error" aria-live="polite"></span>
+        </div>
+        <div class="form-field" data-i18n="auth.password">
+          <label for="reg-password">Password <span class="req" aria-hidden="true">*</span></label>
+          <input id="reg-password" type="password" name="password" required minlength="10" autocomplete="new-password" />
+          <span class="field-error" id="reg-password-error" aria-live="polite"></span>
+          <p class="hint">At least 10 characters.</p>
+        </div>
+        <div class="form-field" data-i18n="auth.confirmPassword">
+          <label for="reg-password2">Confirm password <span class="req" aria-hidden="true">*</span></label>
+          <input id="reg-password2" type="password" name="password2" required autocomplete="new-password" />
+          <span class="field-error" id="reg-password2-error" aria-live="polite"></span>
+        </div>
+        <div class="form-field" data-i18n="auth.displayName">
+          <label for="reg-display">Display name <span class="req" aria-hidden="true">*</span></label>
+          <input id="reg-display" type="text" name="display_name" required />
+          <span class="field-error" id="reg-display-error" aria-live="polite"></span>
+        </div>
+        <button type="submit" class="button button--primary button--wide" id="reg-submit" data-i18n="auth.createAccount">Create account</button>
+        <p class="form-footer" data-i18n="auth.haveAccount">Already have an account?</p>
+        <a href="#/login" class="button button--ghost button--wide" data-i18n="auth.signin">Sign in</a>
       </form>
-      <p id="auth-status" aria-live="polite">Not signed in.</p>
+      <div id="register-message" role="alert" aria-live="polite" class="message"></div>
     </section>
 
-    <section aria-labelledby="alloc-heading">
-      <h2 id="alloc-heading">3. Run the allocation engine</h2>
-      <p class="hint">The solver creates proposals only. Nothing becomes active without volunteer consent.</p>
-      <form id="alloc-form">
-        <label for="project-id">Project ID <input id="project-id" type="text" required /></label>
-        <button type="submit">Generate proposals</button>
-      </form>
-      <pre id="alloc-output" aria-live="polite"></pre>
+    <!-- ============ VOLUNTEER DASHBOARD ============ -->
+    <section id="page-volunteer-dashboard" class="page" role="region" aria-labelledby="vd-heading" hidden>
+      <header class="page-header">
+        <h2 id="vd-heading" data-i18n="volunteer.dashboard">Volunteer dashboard</h2>
+        <p id="vd-welcome" class="welcome" data-i18n="volunteer.welcome">Welcome, {name}</p>
+      </header>
+
+      <div class="grid grid--2">
+        <!-- Profile card -->
+        <article class="card">
+          <h3 data-i18n="volunteer.profileTitle">Volunteer profile</h3>
+          <div class="profile-fields">
+            <div class="kv"><span class="k" data-i18n="volunteer.displayName">Display name</span><span class="v" id="vd-name">—</span></div>
+            <div class="kv"><span class="k" data-i18n="volunteer.timezone">Time zone</span><span class="v" id="vd-tz">—</span></div>
+            <div class="kv"><span class="k" data-i18n="volunteer.weeklyCapacity">Weekly capacity (hours)</span><span class="v" id="vd-capacity">—</span></div>
+            <div class="kv"><span class="k" data-i18n="volunteer.country">Country code</span><span class="v" id="vd-country">—</span></div>
+            <div class="kv"><span class="k" data-i18n="volunteer.contactPermitted">Allow contact</span><span class="v" id="vd-contact">—</span></div>
+          </div>
+          <button class="button button--ghost" id="vd-edit-profile" data-i18n="common.edit">Edit profile</button>
+        </article>
+
+        <!-- Skills -->
+        <article class="card">
+          <h3 data-i18n="volunteer.skills">My skills</h3>
+          <div id="vd-skills-list" class="list">No skills added yet.</div>
+          <form id="form-vd-skills" class="form compact" novalidate>
+            <div class="row">
+              <div class="form-field">
+                <label for="vd-skill" data-i18n="volunteer.skillName">Skill</label>
+                <input id="vd-skill" type="text" name="skill" required />
+              </div>
+              <div class="form-field">
+                <label for="vd-prof" data-i18n="volunteer.proficiency">Proficiency (0–100)</label>
+                <input id="vd-prof" type="number" name="proficiency" min="0" max="100" value="70" required />
+              </div>
+              <div class="form-field">
+                <label for="vd-ks" data-i18n="volunteer.knowledgeState">How certain am I?</label>
+                <select id="vd-ks" name="state">
+                  <option value="KNOWN_TRUE" data-i18n="volunteer.ksKnown">Known true</option>
+                  <option value="UNKNOWN" data-i18n="volunteer.ksUnknown">Not yet known</option>
+                  <option value="STALE" data-i18n="volunteer.ksStale">Stale (needs refresh)</option>
+                </select>
+              </div>
+              <button type="submit" class="button button--primary" id="vd-skill-add" data-i18n="common.save">Save</button>
+            </div>
+            <span id="vd-skill-error" class="field-error" aria-live="polite"></span>
+          </form>
+        </article>
+
+        <!-- Availability -->
+        <article class="card">
+          <h3 data-i18n="volunteer.availability">My availability</h3>
+          <div id="vd-avail-list" class="list">No availability windows added yet.</div>
+          <form id="form-vd-avail" class="form compact" novalidate>
+            <div class="row">
+              <div class="form-field">
+                <label for="vd-avail-start" data-i18n="volunteer.availabilityStart">Available from (UTC)</label>
+                <input id="vd-avail-start" type="datetime-local" name="start_utc" required />
+              </div>
+              <div class="form-field">
+                <label for="vd-avail-end" data-i18n="volunteer.availabilityEnd">Available until (UTC)</label>
+                <input id="vd-avail-end" type="datetime-local" name="end_utc" required />
+              </div>
+              <button type="submit" class="button button--primary" id="vd-avail-add" data-i18n="common.save">Save</button>
+            </div>
+            <span id="vd-avail-error" class="field-error" aria-live="polite"></span>
+          </form>
+        </article>
+
+        <!-- Languages + Preferences -->
+        <article class="card">
+          <h3>Languages &amp; preferences</h3>
+          <div id="vd-lang-list" class="list">No languages added yet.</div>
+          <form id="form-vd-lang" class="form compact" novalidate>
+            <div class="row">
+              <div class="form-field">
+                <label for="vd-lang" data-i18n="volunteer.language">Language</label>
+                <input id="vd-lang" type="text" name="language" placeholder="e.g. en, fr, es" required />
+              </div>
+              <button type="submit" class="button button--primary" id="vd-lang-add" data-i18n="common.save">Save</button>
+            </div>
+            <span id="vd-lang-error" class="field-error" aria-live="polite"></span>
+          </form>
+          <p class="hint" data-i18n="volunteer.preferencesDesc">Tell us how interested you are in each kind of task.</p>
+          <form id="form-vd-pref" class="form compact" novalidate>
+            <div class="row">
+              <div class="form-field">
+                <label for="vd-pref-task" data-i18n="org.taskName">Task type</label>
+                <input id="vd-pref-task" type="text" name="task_type" placeholder="e.g. translation" required />
+              </div>
+              <div class="form-field">
+                <label for="vd-pref-val" data-i18n="common.status">Interest</label>
+                <select id="vd-pref-val" name="value">
+                  <option value="INTERESTED" data-i18n="volunteer.ksKnown">Interested</option>
+                  <option value="NEUTRAL">Neutral</option>
+                  <option value="AVOID">Avoid</option>
+                </select>
+              </div>
+              <button type="submit" class="button button--primary" id="vd-pref-add" data-i18n="common.save">Save</button>
+            </div>
+            <span id="vd-pref-error" class="field-error" aria-live="polite"></span>
+          </form>
+        </article>
+      </div>
+
+      <section class="card">
+        <h3 data-i18n="volunteer.proposals">Proposals for you</h3>
+        <div id="vd-proposals-list" class="list">Loading proposals…</div>
+      </section>
+
+      <section class="card">
+        <h3 data-i18n="volunteer.myAssignments">My assignments</h3>
+        <div id="vd-assignments-list" class="list">Loading assignments…</div>
+      </section>
+
+      <div id="vd-message" role="alert" aria-live="polite" class="message"></div>
     </section>
 
-    <section aria-labelledby="explain-heading">
-      <h2 id="explain-heading">4. Understand the result</h2>
-      <pre id="explain-output" aria-live="polite">No run yet.</pre>
+    <!-- ============ ORGANIZATION DASHBOARD ============ -->
+    <section id="page-org-dashboard" class="page" role="region" aria-labelledby="od-heading" hidden>
+      <header class="page-header">
+        <h2 id="od-heading" data-i18n="org.dashboard">Organization dashboard</h2>
+        <p id="vd-welcome" class="welcome">—</p>
+      </header>
+
+      <!-- Create organization -->
+      <article class="card">
+        <h3 data-i18n="org.register">Register an organization</h3>
+        <form id="form-org-create" class="form compact" novalidate>
+          <div class="row">
+            <div class="form-field">
+              <label for="org-name" data-i18n="org.orgName">Organization name <span class="req" aria-hidden="true">*</span></label>
+              <input id="org-name" type="text" name="name" required />
+            </div>
+            <div class="form-field">
+              <label for="org-country" data-i18n="org.country">Country code</label>
+              <input id="org-country" type="text" name="country_code" maxlength="2" placeholder="US" />
+            </div>
+          </div>
+          <div class="form-field">
+            <label for="org-evidence" data-i18n="org.evidence">Verification evidence (optional)</label>
+            <input id="org-evidence" type="text" name="evidence_ref" placeholder="e.g. tax reference" />
+          </div>
+          <button type="submit" class="button button--primary" id="org-create-submit" data-i18n="org.register">Register an organization</button>
+          <span id="org-create-error" class="field-error" aria-live="polite"></span>
+          <p class="hint">Your organization starts as pending verification. An administrator must verify it before you can create projects.</p>
+        </form>
+      </article>
+
+      <div class="org-info card">
+        <h3 data-i18n="org.verification">Verification status</h3>
+        <div class="kv"><span class="k" data-i18n="org.orgName">Organization name</span><span class="v" id="od-org-name">—</span></div>
+        <div class="kv"><span class="k" data-i18n="org.statusPending">Status</span><span class="v badge badge--pending" id="od-org-status">—</span></div>
+        <div class="kv"><span class="k" data-i18n="org.country">Country code</span><span class="v" id="od-org-country">—</span></div>
+        <div class="kv"><span class="k">Organization ID</span><span class="v" id="od-org-id">—</span></div>
+      </div>
+
+      <div class="grid grid--2">
+        <article class="card">
+          <h3 data-i18n="org.createProject">Create a project</h3>
+          <form id="form-od-project" class="form compact" novalidate>
+            <div class="row">
+              <div class="form-field">
+                <label for="od-proj-name" data-i18n="org.projectName">Project name <span class="req" aria-hidden="true">*</span></label>
+                <input id="od-proj-name" type="text" name="name" required />
+              </div>
+              <div class="form-field">
+                <label for="od-proj-desc" data-i18n="org.projectDescription">Description</label>
+                <textarea id="od-proj-desc" name="description" rows="2"></textarea>
+              </div>
+            </div>
+            <button type="submit" class="button button--primary" id="od-proj-submit" data-i18n="org.createProject">Create project</button>
+            <span id="od-proj-error" class="field-error" aria-live="polite"></span>
+          </form>
+        </article>
+
+        <article class="card">
+          <h3 data-i18n="org.createTask">Create a task</h3>
+          <form id="form-od-task" class="form compact" novalidate>
+            <div class="row">
+              <div class="form-field">
+                <label for="od-task-proj" data-i18n="org.project">Project <span class="req" aria-hidden="true">*</span></label>
+                <select id="od-task-proj" name="project_id" required>
+                  <option value="" disabled selected hidden>Select a project</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="od-task-name" data-i18n="org.taskName">Task name <span class="req" aria-hidden="true">*</span></label>
+                <input id="od-task-name" type="text" name="name" required />
+              </div>
+            </div>
+            <div class="row">
+              <div class="form-field">
+                <label for="od-task-desc" data-i18n="org.taskDescription">Description</label>
+                <textarea id="od-task-desc" name="description" rows="2"></textarea>
+              </div>
+            </div>
+            <div class="row">
+              <div class="form-field">
+                <label for="od-task-effort" data-i18n="org.effortHours">Effort (hours) <span class="req" aria-hidden="true">*</span></label>
+                <input id="od-task-effort" type="number" name="effort_hours" min="0.01" max="168" step="0.5" value="4" required />
+              </div>
+              <div class="form-field">
+                <label for="od-task-start" data-i18n="org.startUtc">Work starts (UTC) <span class="req" aria-hidden="true">*</span></label>
+                <input id="od-task-start" type="datetime-local" name="start_utc" required />
+              </div>
+              <div class="form-field">
+                <label for="od-task-end" data-i18n="org.endUtc">Work ends (UTC) <span class="req" aria-hidden="true">*</span></label>
+                <input id="od-task-end" type="datetime-local" name="end_utc" required />
+              </div>
+              <div class="form-field">
+                <label for="od-task-deadline" data-i18n="org.deadlineUtc">Deadline (UTC) <span class="req" aria-hidden="true">*</span></label>
+                <input id="od-task-deadline" type="datetime-local" name="deadline_utc" required />
+              </div>
+            </div>
+            <div class="row">
+              <div class="form-field">
+                <label for="od-task-max" data-i18n="org.maxAssignees">Max volunteers</label>
+                <input id="od-task-max" type="number" name="max_assignees" min="1" max="20" value="1" />
+              </div>
+              <div class="form-field">
+                <label for="od-task-lang" data-i18n="org.requiredLanguages">Required languages (comma separated)</label>
+                <input id="od-task-lang" type="text" name="required_languages" placeholder="en, fr" />
+              </div>
+            </div>
+            <div class="row">
+              <div class="form-field">
+                <label for="od-task-skills" data-i18n="org.requiredSkills">Required skills (name:minprof, e.g. translation:60)</label>
+                <textarea id="od-task-skills" name="required_skills" rows="2" placeholder="translation:60, accessibility:40"></textarea>
+              </div>
+            </div>
+            <div class="row checkboxes">
+              <label class="checkbox"><input type="checkbox" name="acceptance_criteria" checked /> <span data-i18n="org.acceptanceCriteria">Acceptance criteria are defined</span></label>
+              <label class="checkbox"><input type="checkbox" name="requires_approval" /> <span data-i18n="org.requiresApproval">Assignment needs approval before starting</span></label>
+            </div>
+            <button type="submit" class="button button--primary" id="od-task-submit" data-i18n="org.createTask">Create task</button>
+            <span id="od-task-error" class="field-error" aria-live="polite"></span>
+          </form>
+        </article>
+      </div>
+
+      <section class="card">
+        <h3 data-i18n="org.projects">My projects</h3>
+        <div id="od-projects-list" class="list">Loading projects…</div>
+      </section>
+
+      <section class="card">
+        <h3 data-i18n="org.proposals">Proposals for my tasks</h3>
+        <div id="od-proposals-list" class="list">Loading proposals…</div>
+      </section>
+
+      <div id="od-message" role="alert" aria-live="polite" class="message"></div>
     </section>
 
-    <section aria-labelledby="about-heading">
-      <h2 id="about-heading">What this verifies</h2>
-      <ul>
-        <li>Hard constraints are enforced by OR-Tools CP-SAT.</li>
-        <li>Unknown or stale information is preserved, not guessed.</li>
-        <li>Proposals require recorded consent before activation.</li>
-        <li>Withdrawal generates a repair diff without silently changing other commitments.</li>
-      </ul>
-      <p>Independent research prototype. Not affiliated with UNV, HOT, or OpenStreetMap.</p>
+    <!-- ============ COORDINATOR DASHBOARD ============ -->
+    <section id="page-coordinator-dashboard" class="page" role="region" aria-labelledby="cd-heading" hidden>
+      <header class="page-header">
+        <h2 id="cd-heading" data-i18n="coord.dashboard">Coordinator dashboard</h2>
+      </header>
+
+      <article class="card">
+        <h3 data-i18n="coord.allocationRun">Run allocation</h3>
+        <form id="form-cd-run" class="form compact" novalidate>
+          <div class="row">
+            <div class="form-field">
+              <label for="cd-project" data-i18n="coord.selectProject">Select a project <span class="req" aria-hidden="true">*</span></label>
+              <select id="cd-project" name="project_id" required>
+                <option value="" disabled selected hidden>Select a project</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label for="cd-mode" data-i18n="coord.solverMode">Solver mode</label>
+              <select id="cd-mode" name="mode">
+                <option value="FAIRNESS_AWARE" data-i18n="coord.modeFairness">Fairness-aware</option>
+                <option value="FEASIBILITY" data-i18n="coord.modeFeasibility">Feasibility</option>
+                <option value="EFFICIENCY" data-i18n="coord.modeEfficiency">Efficiency</option>
+              </select>
+            </div>
+          </div>
+          <button type="submit" class="button button--primary" id="cd-run-submit" data-i18n="coord.runSolver">Generate proposals</button>
+          <span id="cd-run-error" class="field-error" aria-live="polite"></span>
+        </form>
+      </article>
+
+      <section class="card">
+        <h3 data-i18n="coord.proposals">Proposals</h3>
+        <div id="cd-proposals-list" class="list">Loading proposals…</div>
+      </section>
+
+      <article class="card">
+        <h3 data-i18n="coord.withdrawals">Withdrawals &amp; repair</h3>
+        <form id="form-cd-event" class="form compact" novalidate>
+          <div class="row">
+            <div class="form-field">
+              <label for="cd-event-type" data-i18n="coord.eventType">Event type <span class="req" aria-hidden="true">*</span></label>
+              <select id="cd-event-type" name="event_type" required>
+                <option value="WITHDRAWAL" data-i18n="coord.withdrawal">Volunteer withdrawal</option>
+                <option value="DEADLINE_CHANGE" data-i18n="coord.deadlineChange">Deadline change</option>
+                <option value="NEW_TASK" data-i18n="coord.newTask">New task added</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label for="cd-assignment" data-i18n="coord.assignmentId">Assignment ID</label>
+              <input id="cd-assignment" type="text" name="assignment_id" placeholder="asg_..." />
+            </div>
+            <div class="form-field">
+              <label for="cd-occurred" data-i18n="coord.occurredAt">When did it occur (UTC)?</label>
+              <input id="cd-occurred" type="datetime-local" name="occurred_at" required />
+            </div>
+            <div class="form-field">
+              <label for="cd-note" data-i18n="coord.note">Note</label>
+              <input id="cd-note" type="text" name="note" />
+            </div>
+          </div>
+          <button type="submit" class="button button--primary" id="cd-event-submit" data-i18n="coord.record">Record event</button>
+          <span id="cd-event-error" class="field-error" aria-live="polite"></span>
+        </form>
+        <div id="cd-event-result" class="result" aria-live="polite"></div>
+      </article>
+
+      <div id="cd-message" role="alert" aria-live="polite" class="message"></div>
+    </section>
+
+    <!-- ============ ADMIN DASHBOARD ============ -->
+    <section id="page-admin-dashboard" class="page" role="region" aria-labelledby="ad-heading" hidden>
+      <header class="page-header">
+        <h2 id="ad-heading" data-i18n="admin.dashboard">Admin dashboard</h2>
+      </header>
+
+      <article class="card">
+        <h3 data-i18n="admin.verifyOrgs">Verify organizations</h3>
+        <div id="ad-orgs-list" class="list">Loading organizations…</div>
+      </article>
+
+      <article class="card">
+        <h3 data-i18n="admin.auditLog">Audit log</h3>
+        <div class="toolbar">
+          <label for="ad-audit-limit">Show <select id="ad-audit-limit"><option>20</option><option>50</option><option>100</option></select> entries</label>
+          <button class="button button--primary" id="ad-audit-refresh" data-i18n="common.retry">Refresh</button>
+        </div>
+        <div id="ad-audit-list" class="list list--table">Loading audit log…</div>
+      </article>
+
+      <article class="card">
+        <h3 data-i18n="admin.manageUsers">Manage users</h3>
+        <div id="ad-users-list" class="list">Loading users…</div>
+      </article>
+
+      <div id="ad-message" role="alert" aria-live="polite" class="message"></div>
+    </section>
+
+    <!-- ============ PROFILE / SETTINGS ============ -->
+    <section id="page-profile" class="page" role="region" aria-labelledby="pf-heading" hidden>
+      <header class="page-header">
+        <h2 id="pf-heading" data-i18n="nav.profile">Profile</h2>
+      </header>
+
+      <article class="card">
+        <h3 data-i18n="nav.langSwitch">Language</h3>
+        <p class="hint">Choose your display language. All text on this page updates immediately.</p>
+        <div class="row">
+          <button class="language-button" data-lang="en" aria-pressed="true" id="lang-btn-en">English</button>
+          <button class="language-button" data-lang="fr" aria-pressed="false" id="lang-btn-fr">Français</button>
+          <button class="language-button" data-lang="es" aria-pressed="false" id="lang-btn-es">Español</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3 data-i18n="auth.sessionExpired">Session</h3>
+        <div class="kv"><span class="k" data-i18n="admin.user">User</span><span class="v" id="pf-user">—</span></div>
+        <div class="kv"><span class="k" data-i18n="admin.role">Role</span><span class="v" id="pf-role">—</span></div>
+      </article>
+
+      <div id="pf-message" role="alert" aria-live="polite" class="message"></div>
     </section>
   </main>
-  <script src="/app.js"></script>
+
+  <div id="announcer" aria-live="polite" aria-atomic="true" class="sr-only"></div>
+
+  <footer class="site-footer">
+    <p data-i18n="footer.disclaimer">Independent research prototype. Not affiliated with UNV, HOT, or OpenStreetMap.</p>
+    <p data-i18n="footer.notProduction">Not production-ready.</p>
+    <p class="demo-note" data-i18n="app.demo">All data is fictional demo data. No real people or organizations are created.</p>
+  </footer>
+
+  <script src="/app.js?v=4"></script>
 </body>
 </html>
