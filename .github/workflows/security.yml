@@ -1,0 +1,83 @@
+name: Security scans
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  # ------------------------------------------------------------------
+  # Dependency vulnerability scan (PyPA pip-audit).
+  # ------------------------------------------------------------------
+  dependency-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies and pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e backend/
+          pip install pip-audit
+
+      - name: Audit Python dependencies for known vulnerabilities
+        working-directory: backend
+        run: pip-audit
+
+  # ------------------------------------------------------------------
+  # Static application security testing (Bandit).
+  # ------------------------------------------------------------------
+  sast-bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install Bandit
+        run: pip install bandit
+
+      - name: Run Bandit SAST scan over backend/app
+        run: |
+          bandit -r backend/app -f txt -o bandit-results.txt -s B105,B311
+          cat bandit-results.txt
+        # B105 (hardcoded passwords) is skipped: demo credentials exist
+        # intentionally in the prototype and are disabled in production via
+        # EQUITASK_ENABLE_DEMO_SEED=false. B311 (random) is skipped: the
+        # demo seed and the deterministic solver use Random by design.
+        # Re-enable these checks once demo secrets are removed from code.
+
+  # ------------------------------------------------------------------
+  # Secret scanning (detect-secrets).
+  # ------------------------------------------------------------------
+  secret-scanning:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install detect-secrets
+        run: pip install detect-secrets
+
+      - name: Scan for committed secrets
+        run: |
+          detect-secrets scan \
+            --baseline .secrets.baseline \
+            --exclude-files '\.git/|backend/equitask\.db|tests/test_.*\.db|docs/\.vitepress/' \
+            .

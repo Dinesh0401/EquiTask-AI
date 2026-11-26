@@ -1,0 +1,78 @@
+# EquiTask AI — local development stack (Docker Compose).
+#
+# Services:
+#   db      PostgreSQL 16 with a named volume for persistent data.
+#   migrate Runs `alembic upgrade head` against the DB, then exits.
+#   app     FastAPI backend (built from backend/Dockerfile).
+#
+# DRAFT — requires security review before real users. Default passwords below
+# are development-only; override them via backend/.env (never commit real
+# secrets — see backend/.env.example).
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: equitask
+      POSTGRES_PASSWORD: equitask
+      POSTGRES_DB: equitask
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - equitask_db_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U equitask -d equitask"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      EQUITASK_DATABASE_URL: postgresql+psycopg2://equitask:equitask@db:5432/equitask
+      EQUITASK_SECRET_KEY: ${EQUITASK_SECRET_KEY:-change-me-in-development}
+      EQUITASK_ENABLE_DEMO_SEED: "false"
+    command: alembic upgrade head
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    environment:
+      EQUITASK_DATABASE_URL: postgresql+psycopg2://equitask:equitask@db:5432/equitask
+      EQUITASK_SECRET_KEY: ${EQUITASK_SECRET_KEY:-change-me-in-development}
+      EQUITASK_TOKEN_TTL_MINUTES: "720"
+      EQUITASK_SOLVER_TIME_LIMIT_SECONDS: "5"
+      EQUITASK_MAX_PROBLEM_VOLUNTEERS: "200"
+      EQUITASK_MAX_PROBLEM_TASKS: "200"
+      EQUITASK_REQUEST_RATE_LIMIT: "120"
+      EQUITASK_STALE_FIELD_HOURS: "336"
+      EQUITASK_PASSWORD_ITERATIONS: "210000"
+      EQUITASK_ENABLE_DEMO_SEED: "false"
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  equitask_db_data:
+    name: equitask_db_data

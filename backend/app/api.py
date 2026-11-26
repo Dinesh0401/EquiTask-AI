@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from .allocation import allocate, build_repair_plan
 from .allocation.policy import version_metadata
+from .health import overall_health
 from .auth import create_token, current_user, hash_password, require_roles, verify_password
 from .config import get_settings
 from .db import get_db
@@ -310,8 +311,8 @@ def _persist_result(db: Session, result: AllocationResult, project_id: str | Non
 
 
 @router.get("/health")
-def health() -> dict:
-    return {"status": "ok", "service": "equitask", "version": "0.1.0"}
+def health(db=Depends(get_db)) -> dict:  # type: ignore[valid-type]
+    return overall_health(db)
 
 
 _SELF_REGISTERABLE_ROLES = {Role.VOLUNTEER.value, Role.ORGANIZATION.value}

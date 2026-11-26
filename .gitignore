@@ -59,3 +59,9 @@ simulations/test_*.db
 
 # Test databases
 tests/test_*.db
+
+# Security scan outputs (transient CI artifacts)
+*.sarif
+trivy-results*
+bandit-results*
+

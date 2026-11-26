@@ -12,6 +12,7 @@ from .api import router
 from .config import get_settings
 from .db import init_db
 from .domain.state_machine import InvalidTransition
+from .health import router as health_router
 
 settings = get_settings()
 app = FastAPI(
@@ -60,6 +61,7 @@ class SimpleRateLimit(BaseHTTPMiddleware):
 
 app.add_middleware(SimpleRateLimit, limit=settings.request_rate_limit)
 app.include_router(router)
+app.include_router(health_router)  # root-level /health for load balancers / container probes
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 if STATIC_DIR.is_dir():
