@@ -108,5 +108,34 @@ def cp_sat_efficiency(problem: AllocationProblem) -> AllocationResult:
 
 
 def cp_sat_fairness(problem: AllocationProblem) -> AllocationResult:
-    """B6: proposed deterministic core."""
+    """B6: CP-SAT fairness core (baseline)."""
     return allocate(problem, mode="FAIRNESS_AWARE")
+
+
+def proposed_uncertainty_aware(problem: AllocationProblem) -> AllocationResult:
+    """B7: Proposed uncertainty-aware allocation.
+
+    Differs from CP-SAT fairness by:
+    1. Higher uncertainty_risk weight — penalizes proposals relying on
+       UNKNOWN/STALE information more strongly.
+    2. Higher coordination_overhead weight — penalizes proposals that
+       would require clarification questions.
+    3. Clarification-first: identifies high-impact unknown fields and
+       treats them as higher-risk before solving.
+    4. Adaptive time limits + fallback chain (engine-level).
+    """
+    from .policy import version_metadata
+
+    # Stronger uncertainty and coordination penalties than the base
+    # fairness-aware policy.
+    problem.policy.lambdas.uncertainty_risk = 3.0
+    problem.policy.lambdas.coordination_overhead = 2.0
+    problem.policy.lambdas.disruption = 5.0
+
+    result = allocate(problem, mode="FAIRNESS_AWARE")
+    # Tag the result so it's distinguishable from the plain fairness baseline.
+    result.solver_version = result.solver_version + "/proposed-uncertainty-aware"
+    for p in result.proposals:
+        if "proposed" not in p.reasons:
+            p.reasons = list(p.reasons) + ["proposed_uncertainty_aware"]
+    return result

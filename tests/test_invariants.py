@@ -29,7 +29,7 @@ from app.allocation import allocate
 from app.allocation.baselines import greedy_skill_match, random_feasible
 
 
-def _task(task_id: str, effort: float = 4.0, skill: str = "translation", proficiency: int = 50) -> TaskInput:
+def _task(task_id: str, effort: float = 4.0, skill: str = "translation", proficiency: int = 50, required: bool = True) -> TaskInput:
     now = datetime(2026, 12, 1, tzinfo=timezone.utc)
     return TaskInput(
         id=task_id,
@@ -43,6 +43,7 @@ def _task(task_id: str, effort: float = 4.0, skill: str = "translation", profici
         value=100,
         acceptance_criteria_present=True,
         organization_verified=True,
+        required=required,
     )
 
 
@@ -118,9 +119,12 @@ def test_withdrawn_consent_excluded():
 # ---------------------------------------------------------------------------
 def test_capacity_invariant_enforced():
     # Two tasks each needing 6 hours; volunteer capacity 10 -> only one fits.
+    # t1 is required (must be covered), t2 is optional (best-effort).
+    t1 = _task("t1", effort=6.0)
+    t2 = _task("t2", effort=6.0, required=False)
     problem = _problem(
         volunteers=[_volunteer("v1", capacity=10.0, committed=0.0)],
-        tasks=[_task("t1", effort=6.0), _task("t2", effort=6.0)],
+        tasks=[t1, t2],
     )
     result = allocate(problem)
     assert result.status == SolverStatus.OPTIMAL_PROPOSALS
@@ -153,11 +157,14 @@ def test_no_overlapping_commitment():
         deadline_utc=now.replace(day=4),
         max_assignees=1, value=100, acceptance_criteria_present=True, organization_verified=True,
     )
+    # t1 is required, t2 is optional (overlapping, best-effort).
+    t2.required = False
     problem = _problem(volunteers=[_volunteer("v1")], tasks=[t1, t2])
     result = allocate(problem)
     assert result.status == SolverStatus.OPTIMAL_PROPOSALS
-    # Same volunteer cannot take both overlapping tasks.
-    assert len(result.proposals) <= 1
+    # Same volunteer cannot take both overlapping tasks; only required t1 covered.
+    assert len(result.proposals) == 1
+    assert result.proposals[0].task_id == "t1"
 
 
 # ---------------------------------------------------------------------------

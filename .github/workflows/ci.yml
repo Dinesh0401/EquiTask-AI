@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [master, phase-1-1-security-correctness]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e backend/
+          pip install pytest pytest-cov
+
+      - name: Compile check
+        run: |
+          cd backend
+          python -m compileall -q app
+
+      - name: Run test suite
+        run: |
+          EQUITASK_PASSWORD_ITERATIONS=1000 python -m pytest tests/ -v
+
+      - name: Test Alembic migrations
+        run: |
+          cd backend
+          rm -f test_migration.db
+          EQUITASK_DATABASE_URL="sqlite:///test_migration.db" python -m alembic upgrade head
+          python -c "import sqlite3; c=sqlite3.connect('test_migration.db'); cols=[r[1] for r in c.execute('PRAGMA table_info(tasks)')]; assert 'required' in cols; print('Migration OK')"
+          rm -f test_migration.db
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+        if: always()

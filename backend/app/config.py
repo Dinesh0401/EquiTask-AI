@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     max_problem_volunteers: int = 200
     max_problem_tasks: int = 200
     request_rate_limit: int = 120
-    enable_demo_seed: bool = True
+    enable_demo_seed: bool = False
 
     model_config = SettingsConfigDict(env_prefix="EQUITASK_", env_file=".env", extra="ignore")
 

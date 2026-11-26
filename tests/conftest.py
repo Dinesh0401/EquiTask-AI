@@ -1,17 +1,44 @@
-"""Pytest fixtures for EquiTask AI tests."""
+"""Pytest fixtures for EquiTask AI tests.
+
+Uses an isolated file-based SQLite database for all tests so that development
+and production data are never touched, modified, or dropped.
+"""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import os
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.main import app
-from app.db import SessionLocal, engine as app_engine, Base
+from app.db import Base, SessionLocal
 from app.config import get_settings
+
+
+# Isolated test database: file-based SQLite in the project root, never the
+# development/production database (equitask.db).
+TEST_DATABASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tests", "test_equitask.db"))
+TEST_DATABASE_URL = f"sqlite:///{TEST_DATABASE_PATH}"
+_test_engine = create_engine(
+    TEST_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def create_test_schema() -> None:
+    """Create all tables in the isolated test database once per session."""
+    # Remove any stale test database from a previous run.
+    if os.path.exists(TEST_DATABASE_PATH):
+        os.remove(TEST_DATABASE_PATH)
+    Base.metadata.create_all(bind=_test_engine)
+    yield
+    Base.metadata.drop_all(bind=_test_engine)
+    # Do not delete the file while connections may still be open on Windows.
 
 
 @pytest.fixture(scope="session")
@@ -21,8 +48,8 @@ def settings():
 
 @pytest.fixture()
 def db_session() -> Session:
-    """Provide a transactional SQLite session for each test."""
-    connection = app_engine.connect()
+    """Provide a transactional session against the isolated test database."""
+    connection = _test_engine.connect()
     transaction = connection.begin()
     session = SessionLocal(bind=connection)
     yield session

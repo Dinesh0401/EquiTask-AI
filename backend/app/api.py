@@ -162,6 +162,7 @@ def _build_problem_from_project(
                 organization_verified=organization.verification_status == OrganizationVerification.VERIFIED.value,
                 required_languages=list(task.required_languages_json or []),
                 requires_approval=bool(task.requires_approval),
+                required=bool(task.required),
             )
         )
 
@@ -313,8 +314,17 @@ def health() -> dict:
     return {"status": "ok", "service": "equitask", "version": "0.1.0"}
 
 
+_SELF_REGISTERABLE_ROLES = {Role.VOLUNTEER.value, Role.ORGANIZATION.value}
+
+
 @router.post("/auth/register", response_model=UserOut)
 def register(payload: UserRegister, db: Session = Depends(get_db)) -> User:
+    if payload.role.value not in _SELF_REGISTERABLE_ROLES:
+        raise HTTPException(
+            403,
+            f"Self-registration is limited to {', '.join(sorted(_SELF_REGISTERABLE_ROLES))}; "
+            "ADMIN and COORDINATOR accounts must be created by an existing administrator.",
+        )
     if db.scalar(select(User).where(User.email == payload.email.casefold())):
         raise HTTPException(409, "Email already registered")
     user = User(
@@ -564,6 +574,15 @@ def create_task(
     org = db.get(Organization, project.organization_id)
     if org is None or org.verification_status != OrganizationVerification.VERIFIED.value:
         raise HTTPException(403, "Organization must be verified")
+    if user.role != Role.ADMIN.value:
+        membership = db.scalar(
+            select(OrgMembership).where(
+                OrgMembership.organization_id == org.id,
+                OrgMembership.user_id == user.id,
+            )
+        )
+        if membership is None:
+            raise HTTPException(403, "Not a member of this organization")
     task = Task(
         id=new_id("tsk"),
         project_id=project.id,
@@ -580,6 +599,7 @@ def create_task(
         acceptance_criteria_present=int(payload.acceptance_criteria_present),
         required_languages_json=payload.required_languages,
         requires_approval=int(payload.requires_approval),
+        required=bool(payload.required),
     )
     db.add(task)
     db.flush()
@@ -600,6 +620,19 @@ def create_task(
     return task
 
 
+def _check_org_membership(db: Session, user: User, organization_id: str) -> None:
+    if user.role == Role.ADMIN.value:
+        return
+    membership = db.scalar(
+        select(OrgMembership).where(
+            OrgMembership.organization_id == organization_id,
+            OrgMembership.user_id == user.id,
+        )
+    )
+    if membership is None:
+        raise HTTPException(403, f"Not a member of organization {organization_id}")
+
+
 @router.post("/allocations/run", response_model=AllocationResult)
 def run_allocation(
     payload: AllocationRunRequest,
@@ -609,8 +642,23 @@ def run_allocation(
     project_id = payload.project_id
     if payload.problem is not None:
         problem = payload.problem
+        # Authorize against every organization referenced in the raw problem.
+        org_ids = {t.organization_id for t in problem.tasks}
+        for org_id in org_ids:
+            org = db.get(Organization, org_id)
+            if org is None:
+                raise HTTPException(404, f"Organization {org_id} not found")
+            if org.verification_status != OrganizationVerification.VERIFIED.value:
+                raise HTTPException(403, f"Organization {org_id} is not verified")
+            _check_org_membership(db, user, org_id)
     else:
-        problem = _build_problem_from_project(db, project_id)  # type: ignore[arg-type]
+        if project_id is None:
+            raise HTTPException(400, "provide project_id or problem")
+        problem = _build_problem_from_project(db, project_id)
+        project = db.get(Project, project_id)
+        if project is None:
+            raise HTTPException(404, "Project not found")
+        _check_org_membership(db, user, project.organization_id)
     result = allocate(problem)
     run_id = _persist_result(db, result, project_id)
     _audit(db, user.id, "ALLOCATION_RUN", "allocation_run", run_id, result.status.value)
@@ -674,11 +722,30 @@ def get_proposal(
     if proposal is None:
         raise HTTPException(404, "Proposal not found")
     volunteer = db.scalar(select(Volunteer).where(Volunteer.id == proposal.volunteer_id))
-    if user.role not in (Role.ADMIN.value, Role.COORDINATOR.value) and (
-        volunteer is None or volunteer.user_id != user.id
-    ):
+    if user.role == Role.ADMIN.value:
+        return proposal
+    if volunteer is None:
         raise HTTPException(403, "Not permitted to view this proposal")
-    return proposal
+    if volunteer.user_id == user.id:
+        return proposal
+    if user.role == Role.COORDINATOR.value:
+        task = db.get(Task, proposal.task_id)
+        if task is None:
+            raise HTTPException(404, "Task not found")
+        project = db.get(Project, task.project_id)
+        org = db.get(Organization, project.organization_id) if project else None
+        if org is None:
+            raise HTTPException(404, "Organization not found")
+        membership = db.scalar(
+            select(OrgMembership).where(
+                OrgMembership.organization_id == org.id,
+                OrgMembership.user_id == user.id,
+            )
+        )
+        if membership is None:
+            raise HTTPException(403, "Not a member of this organization")
+        return proposal
+    raise HTTPException(403, "Not permitted to view this proposal")
 
 
 AssignmentState_PENDING = "PENDING_APPROVAL"
@@ -696,6 +763,12 @@ def respond_to_proposal(
 
     existing = db.scalar(select(ConsentEvent).where(ConsentEvent.idempotency_key == idempotency_key))
     if existing:
+        if str(existing.proposal_id) != proposal_id:
+            raise HTTPException(409, f"Idempotency key already used for a different proposal ({existing.proposal_id})")
+        if str(existing.actor_id) != str(user.id):
+            raise HTTPException(409, f"Idempotency key already used by a different actor ({existing.actor_id})")
+        if existing.action != payload.action:
+            raise HTTPException(409, f"Idempotency key already used for a different action ({existing.action})")
         assignment = db.scalar(select(Assignment).where(Assignment.proposal_id == proposal_id))
         return {
             "status": "already_processed",
@@ -704,34 +777,55 @@ def respond_to_proposal(
             "assignment_id": assignment.id if assignment else None,
         }
 
-    proposal = db.get(AllocationProposal, proposal_id)
+    proposal = db.scalar(
+        select(AllocationProposal).where(AllocationProposal.id == proposal_id).with_for_update()
+    )
     if proposal is None:
         raise HTTPException(404, "Proposal not found")
-    volunteer = db.scalar(select(Volunteer).where(Volunteer.id == proposal.volunteer_id))
+    volunteer = db.scalar(
+        select(Volunteer).where(Volunteer.id == proposal.volunteer_id).with_for_update()
+    )
     if volunteer is None or (volunteer.user_id != user.id and user.role != Role.ADMIN.value):
         raise HTTPException(403, "Only the invited volunteer may respond")
 
     try:
         if payload.action == "accept":
+            # Record the idempotency key before revalidation so that even a
+            # failed accept is idempotent: replays return "already_processed"
+            # instead of a confusing 409 on an already-expired proposal.
+            db.add(
+                ConsentEvent(
+                    id=new_id("con"),
+                    proposal_id=proposal.id,
+                    action=payload.action,
+                    actor_id=user.id,
+                    reason=payload.reason,
+                    idempotency_key=idempotency_key,
+                    occurred_at=utcnow(),
+                )
+            )
+            db.flush()
+
             transition_proposal(ProposalState(proposal.state), ProposalState.ACCEPTED)
             # Revalidate hard constraints at decision time.
             task = db.get(Task, proposal.task_id)
             project = db.get(Project, task.project_id) if task else None
             org = db.get(Organization, project.organization_id) if project else None
             if task is None or org is None:
+                proposal.state = ProposalState.EXPIRED.value
+                db.commit()
                 raise HTTPException(409, "Task or organization no longer exists")
             if org.verification_status != OrganizationVerification.VERIFIED.value or not task.acceptance_criteria_present:
-                transition_proposal(ProposalState(proposal.state), ProposalState.EXPIRED)
                 proposal.state = ProposalState.EXPIRED.value
                 db.commit()
                 raise HTTPException(409, "Task is no longer publishable")
             availability_rows = list(
                 db.scalars(select(AvailabilityWindow).where(AvailabilityWindow.volunteer_id == volunteer.id)).all()
             )
-            if any(row.epistemic_state == KnowledgeState.KNOWN_FALSE.value for row in availability_rows):
+            if not any(row.epistemic_state == KnowledgeState.KNOWN_TRUE.value for row in availability_rows):
                 proposal.state = ProposalState.EXPIRED.value
                 db.commit()
-                raise HTTPException(409, "Availability is explicitly false")
+                raise HTTPException(409, "Availability is not confirmed as known true")
             active_total = 0.0
             assignments = list(
                 db.scalars(
@@ -741,6 +835,7 @@ def respond_to_proposal(
                         AllocationProposal.volunteer_id == volunteer.id,
                         Assignment.state.in_(_active_assignment_states()),
                     )
+                    .with_for_update()
                 ).all()
             )
             for assignment, other_proposal in assignments:
@@ -751,6 +846,98 @@ def respond_to_proposal(
                 proposal.state = ProposalState.EXPIRED.value
                 db.commit()
                 raise HTTPException(409, "Acceptance would exceed agreed capacity")
+
+            # Full revalidation of mandatory requirements before activation.
+            skill_rows = list(db.scalars(select(TaskSkill).where(TaskSkill.task_id == task.id)).all())
+            for row in skill_rows:
+                skill = db.get(Skill, row.skill_id)
+                if skill is None:
+                    continue
+                vs = list(
+                    db.scalars(
+                        select(VolunteerSkill).where(
+                            VolunteerSkill.volunteer_id == volunteer.id,
+                            VolunteerSkill.skill_id == skill.id,
+                        )
+                    )
+                )
+                if not vs:
+                    proposal.state = ProposalState.EXPIRED.value
+                    db.commit()
+                    raise HTTPException(
+                        409,
+                        f"Volunteer does not report skill {skill.name} required by task {task.id}",
+                    )
+                vs_row = vs[0]
+                if bool(row.mandatory):
+                    # UNKNOWN or STALE mandatory skills cannot confirm eligibility.
+                    # Only KNOWN_TRUE with sufficient proficiency is accepted.
+                    if vs_row.epistemic_state != KnowledgeState.KNOWN_TRUE.value:
+                        proposal.state = ProposalState.EXPIRED.value
+                        db.commit()
+                        raise HTTPException(
+                            409,
+                            f"Mandatory skill {skill.name} is {vs_row.epistemic_state}; "
+                            "eligibility must be confirmed before acceptance.",
+                        )
+                    if vs_row.proficiency < row.min_proficiency:
+                        proposal.state = ProposalState.EXPIRED.value
+                        db.commit()
+                        raise HTTPException(
+                            409,
+                            f"Skill {skill.name} proficiency {vs_row.proficiency} below required {row.min_proficiency}",
+                        )
+
+            # Required languages must be known.
+            if task.required_languages_json:
+                volunteer_languages: set[str] = set()
+                pref_rows = list(
+                    db.scalars(select(PreferenceRow).where(PreferenceRow.volunteer_id == volunteer.id)).all()
+                )
+                for row in pref_rows:
+                    if row.task_type.startswith("language:"):
+                        volunteer_languages.add(row.task_type.split(":", 1)[1])
+                missing_languages = [
+                    lang for lang in task.required_languages_json if lang not in volunteer_languages
+                ]
+                if missing_languages:
+                    proposal.state = ProposalState.EXPIRED.value
+                    db.commit()
+                    raise HTTPException(
+                        409,
+                        f"Volunteer lacks required language(s): {', '.join(missing_languages)}",
+                    )
+
+            # Time-window compatibility: deadline must not precede window end.
+            if task.deadline_utc < task.end_utc:
+                proposal.state = ProposalState.EXPIRED.value
+                db.commit()
+                raise HTTPException(409, "Task deadline precedes its work window end")
+
+            # No overlapping active assignments for the same volunteer.
+            overlapping = list(
+                db.scalars(
+                    select(Assignment, AllocationProposal, Task)
+                    .join(AllocationProposal, Assignment.proposal_id == AllocationProposal.id)
+                    .join(Task, AllocationProposal.task_id == Task.id)
+                    .where(
+                        AllocationProposal.volunteer_id == volunteer.id,
+                        Assignment.state.in_(_active_assignment_states()),
+                        AllocationProposal.id != proposal.id,
+                    )
+                ).all()
+            )
+            for other_assignment, other_proposal, other_task in overlapping:
+                if (
+                    task.start_utc < other_task.end_utc
+                    and other_task.start_utc < task.end_utc
+                ):
+                    proposal.state = ProposalState.EXPIRED.value
+                    db.commit()
+                    raise HTTPException(
+                        409,
+                        f"Task {task.id} overlaps with existing assignment to task {other_task.id}",
+                    )
 
             proposal.state = ProposalState.ACCEPTED.value
             assignment = Assignment(
@@ -768,18 +955,18 @@ def respond_to_proposal(
             transition_proposal(ProposalState(proposal.state), ProposalState.DECLINED)
             proposal.state = ProposalState.DECLINED.value
             assignment_id = None
-
-        db.add(
-            ConsentEvent(
-                id=new_id("con"),
-                proposal_id=proposal.id,
-                action=payload.action,
-                actor_id=user.id,
-                reason=payload.reason,
-                idempotency_key=idempotency_key,
-                occurred_at=utcnow(),
+            db.add(
+                ConsentEvent(
+                    id=new_id("con"),
+                    proposal_id=proposal.id,
+                    action=payload.action,
+                    actor_id=user.id,
+                    reason=payload.reason,
+                    idempotency_key=idempotency_key,
+                    occurred_at=utcnow(),
+                )
             )
-        )
+
         db.add(
             WorkflowEvent(
                 id=new_id("wfe"),
@@ -805,6 +992,8 @@ def respond_to_proposal(
 
 AssignmentState_PENDING = "PENDING_APPROVAL"
 
+
+@router.post("/events")
 def record_event(
     payload: DisruptionEventRequest,
     db: Session = Depends(get_db),
@@ -815,6 +1004,10 @@ def record_event(
 
     existing = db.scalar(select(WorkflowEvent).where(WorkflowEvent.idempotency_key == idempotency_key))
     if existing:
+        if str(existing.aggregate_id) != str(payload.assignment_id):
+            raise HTTPException(409, f"Idempotency key already used for a different aggregate ({existing.aggregate_id})")
+        if str(existing.payload_json.get("actor_id", "")) != str(user.id):
+            raise HTTPException(409, f"Idempotency key already used by a different actor")
         return {"status": "already_processed", "event_type": existing.event_type}
 
     if payload.event_type != "WITHDRAWAL" or not payload.assignment_id:
@@ -840,6 +1033,15 @@ def record_event(
     project = db.get(Project, task.project_id)
     if project is None:
         raise HTTPException(404, "Project not found")
+    if user.role != Role.ADMIN.value:
+        membership = db.scalar(
+            select(OrgMembership).where(
+                OrgMembership.organization_id == project.organization_id,
+                OrgMembership.user_id == user.id,
+            )
+        )
+        if membership is None:
+            raise HTTPException(403, "Not a member of this organization")
 
     problem = _build_problem_from_project(db, project.id, mode=SolverMode.REPAIR)
     plan = build_repair_plan(problem, proposal.volunteer_id, task.id)

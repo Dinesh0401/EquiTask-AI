@@ -5,7 +5,24 @@ from ortools.sat.python import cp_model
 from .. import __version__
 
 SOLVER_VERSION = "ortools-cpsat-dynamic"
-POLICY_VERSION = "v0.1"
+POLICY_VERSION = "v0.1.1"
+
+# Adaptive time limits based on problem size (volunteers * tasks).
+# Larger problems get proportionally more time but are capped.
+BASE_TIME_LIMIT = 5.0
+TIME_PER_PROBLEM_UNIT = 0.001  # seconds per (volunteer * task) pair
+MAX_TIME_LIMIT = 30.0
+MIN_TIME_LIMIT = 1.0
+
+
+def adaptive_time_limit(num_variables: int) -> float:
+    """Compute an adaptive solver time limit based on problem size.
+
+    Ensures small problems solve quickly while giving larger problems
+    enough time without unbounded waits.
+    """
+    limit = BASE_TIME_LIMIT + num_variables * TIME_PER_PROBLEM_UNIT
+    return max(MIN_TIME_LIMIT, min(MAX_TIME_LIMIT, limit))
 
 
 def configure_solver(problem_time_limit: float) -> cp_model.CpSolver:
