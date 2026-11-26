@@ -56,3 +56,6 @@ docs/.vitepress/
 # Simulation experiment results (generated output, not source)
 simulations/results_*.json
 simulations/test_*.db
+
+# Test databases
+tests/test_*.db

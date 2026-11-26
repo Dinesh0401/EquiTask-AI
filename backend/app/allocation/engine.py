@@ -16,7 +16,7 @@ from ..schemas import (
 from .candidate import Candidate, CandidateSet, build_candidates, compute_overlap_pairs
 from .diagnostics import REASON_TEXT, diagnose, detect_cycles
 from .metrics import expected_contribution, overhead_term, risk_term
-from .policy import configure_solver, version_metadata
+from .policy import adaptive_time_limit, configure_solver, version_metadata
 
 SCALE = 1000
 HOUR_SCALE = 10  # tenths of an hour keep CP-SAT arithmetic integral
@@ -261,9 +261,145 @@ def allocate(
         disruption = _int(norm * lambdas.disruption) * sum(disruption_terms) if disruption_terms else 0
         model.Maximize(contribution - unfairness - uncertainty - overhead - disruption)
 
-    solver = configure_solver(policy.solver_time_limit_seconds)
+    # Adaptive time limit based on problem size (number of candidate variables).
+    adaptive_limit = adaptive_time_limit(len(x))
+    solver = configure_solver(adaptive_limit)
     raw_status = solver.Solve(model)
     runtime_ms = elapsed()
+
+    # Fallback chain: if fairness-aware times out, try efficiency-only,
+    # then feasibility-only. This ensures we always return *something*
+    # useful rather than a hard timeout on large instances.
+    fallback_mode = None
+    if (
+        mode == SolverMode.FAIRNESS_AWARE
+        and raw_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+    ):
+        fallback_mode = SolverMode.EFFICIENCY
+    elif mode == SolverMode.EFFICIENCY and raw_status not in (
+        cp_model.OPTIMAL,
+        cp_model.FEASIBLE,
+    ):
+        fallback_mode = SolverMode.FEASIBILITY
+
+    if fallback_mode is not None:
+        fallback_model = cp_model.CpModel()
+        fallback_x: dict[tuple[str, str], object] = {}
+        for index, candidate in enumerate(
+            sorted(candidates, key=lambda c: (c.task_id, c.volunteer_id))
+        ):
+            key = (candidate.volunteer_id, candidate.task_id)
+            fallback_x[key] = fallback_model.NewBoolVar(
+                f"fx_{index}_{candidate.volunteer_id}_{candidate.task_id}"
+            )
+
+        # Re-add only hard constraints (no fairness objective).
+        candidates_by_task_fb: dict[str, list[Candidate]] = defaultdict(list)
+        candidates_by_volunteer_fb: dict[str, list[Candidate]] = defaultdict(list)
+        for candidate in candidates:
+            candidates_by_task_fb[candidate.task_id].append(candidate)
+            candidates_by_volunteer_fb[candidate.volunteer_id].append(candidate)
+
+        for task in publishable_tasks:
+            matching = [
+                fallback_x[(c.volunteer_id, c.task_id)]
+                for c in candidates_by_task_fb.get(task.id, [])
+            ]
+            if len(matching) < task.max_assignees:
+                continue
+            fallback_model.Add(sum(matching) == task.max_assignees)
+
+        effort_by_task_fb = {t.id: _int(t.effort_hours * HOUR_SCALE) for t in problem.tasks}
+        for volunteer in problem.volunteers:
+            remaining = _int((volunteer.capacity_hours - volunteer.committed_hours) * HOUR_SCALE)
+            terms = [
+                effort_by_task_fb[c.task_id] * fallback_x[(volunteer.id, c.task_id)]
+                for c in candidates_by_volunteer_fb.get(volunteer.id, [])
+            ]
+            fallback_model.Add(sum(terms) <= max(0, remaining))
+
+        overlaps_fb = compute_overlap_pairs(publishable_tasks)
+        for a_id, b_id in sorted(overlaps_fb):
+            ids_a = {c.volunteer_id for c in candidates_by_task_fb.get(a_id, [])}
+            ids_b = {c.volunteer_id for c in candidates_by_task_fb.get(b_id, [])}
+            for vid in sorted(ids_a & ids_b):
+                fallback_model.Add(fallback_x[(vid, a_id)] + fallback_x[(vid, b_id)] <= 1)
+
+        completed_fb = set(problem.completed_task_ids)
+        for task in publishable_tasks:
+            for dep in task.dependencies:
+                if dep in completed_fb:
+                    continue
+                dep_vars = [
+                    fallback_x[(c.volunteer_id, dep)]
+                    for c in candidates_by_task_fb.get(dep, [])
+                ]
+                for candidate in candidates_by_task_fb.get(task.id, []):
+                    fallback_model.Add(
+                        fallback_x[(candidate.volunteer_id, task.id)] <= sum(dep_vars)
+                    )
+
+        if fallback_mode == SolverMode.EFFICIENCY:
+            contribution_fb = sum(
+                task_values[c.task_id] * c.fit * fallback_x[(c.volunteer_id, c.task_id)]
+                for c in candidates
+            )
+            fallback_model.Maximize(contribution_fb)
+        # FEASIBILITY: minimize 0 (any feasible solution)
+
+        fb_solver = configure_solver(min(adaptive_limit, MAX_TIME_LIMIT))
+        fb_status = fb_solver.Solve(fallback_model)
+        runtime_ms = elapsed()
+
+        if fb_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            selected = {
+                key for key, var in fallback_x.items() if fb_solver.Value(var) == 1
+            }
+            proposals = sorted(
+                (
+                    ProposalOut(
+                        volunteer_id=c.volunteer_id,
+                        task_id=c.task_id,
+                        fit_score=c.fit,
+                        risk_score=round(c.risk, 4),
+                        reasons=list(c.reasons) + [f"fallback:{fallback_mode.value}"],
+                    )
+                    for c in candidates
+                    if (c.volunteer_id, c.task_id) in selected
+                ),
+                key=lambda p: (p.task_id, p.volunteer_id),
+            )
+            metrics = AllocationMetrics(
+                assigned_tasks=len(selected),
+                candidates=len(candidates),
+                workload_unfairness=0,
+                opportunity_unfairness=0,
+                expected_contribution=expected_contribution(candidates, selected, task_values),
+                uncertainty_risk=risk_term(candidates, selected),
+                coordination_overhead=overhead_term(candidates, selected),
+                objective_value=(
+                    float(fb_solver.ObjectiveValue())
+                    if fallback_mode == SolverMode.EFFICIENCY
+                    else None
+                ),
+                optimality_gap=None,
+                solver_runtime_ms=round(runtime_ms, 3),
+            )
+            status = (
+                SolverStatus.OPTIMAL_PROPOSALS
+                if fb_status == cp_model.OPTIMAL
+                else SolverStatus.FEASIBLE_PROPOSALS
+            )
+            return AllocationResult(
+                status=status,
+                proposals=proposals,
+                questions=questions,
+                metrics=metrics,
+                policy_version=policy_version,
+                solver_version=solver_version,
+                solver_status_raw=f"fallback:{fallback_mode.value}/{fb_solver.StatusName(fb_status)}",
+            )
+
 
     if raw_status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         selected = {

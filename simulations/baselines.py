@@ -14,8 +14,8 @@ from app.allocation.baselines import (
     random_feasible,
     cp_sat_efficiency,
     cp_sat_fairness,
+    proposed_uncertainty_aware,
 )
-from app.allocation import allocate
 from app.schemas import AllocationProblem
 
 
@@ -40,9 +40,7 @@ class BaselineRunner:
         if self.name == "cp_sat_fairness":
             return cp_sat_fairness(problem)
         if self.name == "proposed_uncertainty_aware":
-            # The proposed method is the fairness-aware CP-SAT core with
-            # uncertainty penalization already built into fit/risk scoring.
-            return allocate(problem, mode="FAIRNESS_AWARE")
+            return proposed_uncertainty_aware(problem)
         raise ValueError(f"Unknown baseline: {self.name}")
 
     def is_valid(self, result: Any) -> bool:
