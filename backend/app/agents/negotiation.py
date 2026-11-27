@@ -142,22 +142,20 @@ class NegotiationAgent(BaseAgent[tuple[ProposalOut, VolunteerResponse], MessageD
             )
         else:  # counter
             subject = f"Counter-offer for task {proposal.task_id}"
+            # Treat the volunteer's counter text as data: neutralize any
+            # instruction-like content before embedding it in the draft.
+            safe_response = self._guard.sanitize(response.response_text)
             body = (
                 f"Hello,\n\nThank you for your interest in task "
                 f"{proposal.task_id}. We have noted your counter-offer:\n\n"
-                f"{response.response_text}\n\n"
+                f"{safe_response}\n\n"
                 f"A coordinator will review it and respond. No commitment is "
                 f"made by this draft.\n\nBest regards,\nEquiTask AI Coordinator"
             )
 
-        # Neutralize any instruction-like content the volunteer may have
-        # submitted, so their text is treated as data.
-        guard_injections = []  # placeholder; guard applied via input text below
-        _ = guard_injections
-
         return MessageDraft(
             recipient_id=response.volunteer_id,
-            proposal_id=proposal.volunteer_id and proposal.volunteer_id or response.volunteer_id,
+            proposal_id=proposal.task_id,
             subject=subject,
             body=body,
             can_send=False,  # requires coordinator review before sending
